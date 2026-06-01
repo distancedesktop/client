@@ -7,7 +7,6 @@ export type StreamEvent =
   | { type: 'stopped' }
   | { type: 'error'; message: string }
   | { type: 'stream-ended' }
-  | { type: 'video'; data: ArrayBuffer }
   | { type: 'disconnected' }
   | { type: 'connecting' }
   | { type: 'connected' }
@@ -22,10 +21,6 @@ function parseFingerprint(hex: string): Uint8Array {
   return bytes
 }
 
-type UnidirectionalStream = {
-  readonly readable: ReadableStream
-}
-
 export class WebTransportClient {
   private transport: WebTransport | null = null
   private config: ConnectionConfig
@@ -37,6 +32,14 @@ export class WebTransportClient {
   constructor(config: ConnectionConfig, onEvent: (event: StreamEvent) => void) {
     this.config = config
     this.onEvent = onEvent
+  }
+
+  getTransport(): WebTransport | null {
+    return this.transport
+  }
+
+  getUrl(): string {
+    return `https://${this.config.host}:${this.config.port}/wt`
   }
 
   connect(): void {
@@ -54,11 +57,13 @@ export class WebTransportClient {
   }
 
   private async start(): Promise<void> {
-    const url = `https://${this.config.host}:${this.config.port}/wt`
+    const url = this.getUrl()
     debugLog(`start(): connecting to ${url}`)
     debugLog(`start(): fingerprints:`, this.config.fingerprints)
 
-    const options: WebTransportOptions = {}
+    const options: WebTransportOptions = {
+      protocols: ['moq-lite-04', 'moq-lite-03', 'moql', 'moqt-18', 'moqt-17', 'moqt-16', 'moqt-15'],
+    }
     if (this.config.fingerprints && this.config.fingerprints.length > 0) {
       options.serverCertificateHashes = this.config.fingerprints.map((fp) => ({
         algorithm: 'sha-256',
@@ -90,7 +95,6 @@ export class WebTransportClient {
       throw err
     }
     if (this.aborted) return
-    this.onEvent({ type: 'connected' })
 
     debugLog('start(): creating bidirectional stream...')
     const bidiStream = await this.transport.createBidirectionalStream()
@@ -98,9 +102,10 @@ export class WebTransportClient {
     if (this.aborted) return
     this.writer = bidiStream.writable.getWriter()
 
+    this.onEvent({ type: 'connected' })
+
     const signal = this.abortController!.signal
     this.readControlStream(bidiStream.readable, signal)
-    this.readUniStreams(signal)
   }
 
   private async readControlStream(
@@ -148,40 +153,6 @@ export class WebTransportClient {
       if (!this.aborted && !signal.aborted) {
         this.onEvent({ type: 'error', message: `Control stream error: ${err instanceof Error ? err.message : String(err)}` })
       }
-    }
-  }
-
-  private async readUniStreams(signal: AbortSignal): Promise<void> {
-    try {
-      const uniReader = this.transport!.incomingUnidirectionalStreams.getReader()
-      while (true) {
-        if (signal.aborted) break
-        const { value, done } = await uniReader.read()
-        if (done) break
-        this.readVideoStream(value as UnidirectionalStream, signal)
-      }
-    } catch {
-      // transport closed
-    }
-  }
-
-  private async readVideoStream(
-    stream: UnidirectionalStream,
-    signal: AbortSignal,
-  ): Promise<void> {
-    const reader = stream.readable.getReader()
-
-    try {
-      while (true) {
-        if (signal.aborted) break
-        const { value, done } = await reader.read()
-        if (done) break
-        const src = value as Uint8Array
-        const copy = new Uint8Array(src)
-        this.onEvent({ type: 'video', data: copy.buffer as ArrayBuffer })
-      }
-    } catch {
-      // stream closed
     }
   }
 

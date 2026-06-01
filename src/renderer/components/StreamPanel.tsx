@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import type { DisplayInfo, ConnectionConfig } from '../lib/types'
 import { WebTransportClient, type StreamEvent } from '../lib/webtransport-client'
-import { VideoDecoderClient, type DecoderEvent } from '../lib/video-decoder'
+import { MoqIntegration } from '../lib/moq-integration'
 import { debugLog } from '../lib/debug'
 
 interface Props {
@@ -14,54 +14,14 @@ interface Props {
 export function StreamPanel({ config, onStatusChange, onError, onUpdateFingerprint }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<WebTransportClient | null>(null)
-  const decoderRef = useRef<VideoDecoderClient | null>(null)
-  const animRef = useRef<number>(0)
-  const latestFrameRef = useRef<VideoFrame | null>(null)
+  const moqRef = useRef<MoqIntegration | null>(null)
   const [displays, setDisplays] = useState<DisplayInfo[]>([])
   const [selectedDisplayId, setSelectedDisplayId] = useState<number>(0)
   const [streamInfo, setStreamInfo] = useState<{ width: number; height: number; codec: string } | null>(null)
-  const [decoderReady, setDecoderReady] = useState(false)
-
-  const drawFrame = useCallback(() => {
-    const frame = latestFrameRef.current
-    const canvas = canvasRef.current
-    if (!frame || !canvas) return
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    canvas.width = frame.displayWidth
-    canvas.height = frame.displayHeight
-    ctx.drawImage(frame, 0, 0)
-    frame.close()
-    latestFrameRef.current = null
-
-    animRef.current = requestAnimationFrame(drawFrame)
-  }, [])
 
   useEffect(() => {
-    const decoder = new VideoDecoderClient((event: DecoderEvent) => {
-      switch (event.type) {
-        case 'frame':
-          if (latestFrameRef.current) {
-            latestFrameRef.current.close()
-          }
-          latestFrameRef.current = event.frame
-          if (!animRef.current) {
-            animRef.current = requestAnimationFrame(drawFrame)
-          }
-          break
-        case 'error':
-          debugLog('StreamPanel: decoder error:', event.message)
-          onError(config.id, event.message)
-          break
-        case 'config':
-          debugLog('StreamPanel: decoder configured')
-          setDecoderReady(true)
-          break
-      }
-    })
-    decoderRef.current = decoder
+    const moq = new MoqIntegration()
+    moqRef.current = moq
 
     const client = new WebTransportClient(config, (event: StreamEvent) => {
       debugLog('StreamPanel: event:', event.type, event)
@@ -69,11 +29,19 @@ export function StreamPanel({ config, onStatusChange, onError, onUpdateFingerpri
         case 'connecting':
           onStatusChange(config.id, 'connecting')
           break
-        case 'connected':
+        case 'connected': {
           debugLog('StreamPanel: connected, requesting display list')
           onStatusChange(config.id, 'connected')
           client.listDisplays()
+
+          const wt = client.getTransport()
+          if (wt) {
+            moq.connect(wt, client.getUrl()).catch((err) => {
+              debugLog('StreamPanel: MoQ connect error:', err)
+            })
+          }
           break
+        }
         case 'displays':
           debugLog('StreamPanel: received', event.displays.length, 'displays')
           setDisplays(event.displays)
@@ -81,21 +49,30 @@ export function StreamPanel({ config, onStatusChange, onError, onUpdateFingerpri
             setSelectedDisplayId(event.displays[0].id)
           }
           break
-        case 'started':
+        case 'started': {
           debugLog('StreamPanel: stream started', event.width, 'x', event.height, event.codec)
           setStreamInfo({ width: event.width, height: event.height, codec: event.codec })
           onStatusChange(config.id, 'streaming')
+
+          const canvas = canvasRef.current
+          if (canvas && moq.connected) {
+            moq.startDisplay(canvas, selectedDisplayId)
+          } else {
+            debugLog('StreamPanel: MoQ not ready yet, will retry in 500ms')
+            setTimeout(() => {
+              if (canvas && moqRef.current?.connected) {
+                moqRef.current.startDisplay(canvas, selectedDisplayId)
+              }
+            }, 500)
+          }
           break
-        case 'video':
-          decoder.feed(event.data)
-          break
+        }
         case 'stopped':
         case 'stream-ended':
           debugLog('StreamPanel: stream ended')
           setStreamInfo(null)
-          setDecoderReady(false)
           setDisplays([])
-          decoder.close()
+          moq.stopDisplay()
           onStatusChange(config.id, 'connected')
           break
         case 'error':
@@ -105,9 +82,8 @@ export function StreamPanel({ config, onStatusChange, onError, onUpdateFingerpri
         case 'disconnected':
           debugLog('StreamPanel: disconnected')
           setStreamInfo(null)
-          setDecoderReady(false)
           setDisplays([])
-          decoder.close()
+          moq.close()
           onStatusChange(config.id, 'disconnected')
           break
         case 'fingerprint-refresh':
@@ -120,16 +96,10 @@ export function StreamPanel({ config, onStatusChange, onError, onUpdateFingerpri
     client.connect()
 
     return () => {
-      cancelAnimationFrame(animRef.current)
-      animRef.current = 0
-      if (latestFrameRef.current) {
-        latestFrameRef.current.close()
-        latestFrameRef.current = null
-      }
-      decoder.close()
+      moq.close()
       client.disconnect()
     }
-  }, [config, onStatusChange, onError, drawFrame])
+  }, [config, onStatusChange, onError, onUpdateFingerprint])
 
   const handleStart = () => {
     streamRef.current?.startStream(selectedDisplayId)
@@ -137,8 +107,8 @@ export function StreamPanel({ config, onStatusChange, onError, onUpdateFingerpri
 
   const handleStop = () => {
     streamRef.current?.stopStream()
+    moqRef.current?.stopDisplay()
     setStreamInfo(null)
-    setDecoderReady(false)
   }
 
   return (
@@ -163,7 +133,6 @@ export function StreamPanel({ config, onStatusChange, onError, onUpdateFingerpri
       {streamInfo && (
         <div className="stream-info-bar">
           <span>Streaming: {streamInfo.width}x{streamInfo.height} ({streamInfo.codec})</span>
-          {decoderReady && <span className="decoder-badge">WebCodecs</span>}
           <button className="stop-btn" onClick={handleStop}>Stop</button>
         </div>
       )}
@@ -173,7 +142,7 @@ export function StreamPanel({ config, onStatusChange, onError, onUpdateFingerpri
         {!streamInfo && !displays.length && (
           <div className="stream-placeholder">
             <p>Connected to {config.name}</p>
-            <p className="subtle">Loading displays…</p>
+            <p className="subtle">Loading displays&hellip;</p>
           </div>
         )}
       </div>
