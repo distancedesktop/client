@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import type { DisplayInfo, ConnectionConfig } from '../lib/types'
 import { WebTransportClient, type StreamEvent } from '../lib/webtransport-client'
 import { MoqIntegration } from '../lib/moq-integration'
@@ -34,12 +34,9 @@ export function StreamPanel({ config, onStatusChange, onError, onUpdateFingerpri
           onStatusChange(config.id, 'connected')
           client.listDisplays()
 
-          const wt = client.getTransport()
-          if (wt) {
-            moq.connect(wt, client.getUrl()).catch((err) => {
-              debugLog('StreamPanel: MoQ connect error:', err)
-            })
-          }
+          moq.connect(config.host, config.port, config.fingerprints).catch((err) => {
+            debugLog('StreamPanel: MoQ connect error:', err)
+          })
           break
         }
         case 'displays':
