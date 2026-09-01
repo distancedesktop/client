@@ -173,7 +173,7 @@ export class Sidebar {
     )
     const trustedHint = el('p', {
       class: 'form-hint hidden',
-      text: 'No fingerprint pinning \u2014 the browser validates the certificate itself.'
+      text: 'No fingerprint pinning \u2014 the browser validates the certificate itself, so this requires a CA-trusted certificate.'
     })
     trustedBox.addEventListener('change', () => {
       fpRow.classList.toggle('hidden', trustedBox.checked)
@@ -198,19 +198,26 @@ export class Sidebar {
       const port = parseInt(portInput.value, 10) || 52020
       const trustedCert = trustedBox.checked
       const fp = normalizeFingerprint(fpInput.value)
+      fpInput.setCustomValidity('')
       if (!name || !host) return
-      if (!trustedCert && fp && !isValidFingerprint(fp)) {
-        fpInput.setCustomValidity('Expected 64 hex characters (SHA-256)')
+      // Without trusted-cert mode the fingerprint is mandatory: pinning is the
+      // only way to reach the agent's self-signed cert, and saving an empty list
+      // would produce a connection that StreamPanel.connect always rejects.
+      if (!trustedCert && !isValidFingerprint(fp)) {
+        fpInput.setCustomValidity(
+          fp
+            ? 'Expected 64 hex characters (SHA-256)'
+            : 'A fingerprint is required unless the agent has a trusted certificate'
+        )
         fpInput.reportValidity()
         return
       }
-      fpInput.setCustomValidity('')
       const config: ConnectionConfig = {
         id: crypto.randomUUID(),
         name,
         host,
         port,
-        fingerprints: !trustedCert && fp ? [fp] : [],
+        fingerprints: trustedCert ? [] : [fp],
         trustedCert
       }
       this.cbs.onAdd(config)

@@ -66,14 +66,15 @@ export class Transport {
     const wt = new WebTransport(opts.url, buildOptions(opts.fingerprints))
     this.wt = wt
 
-    wt.closed.then(
-      () => {
-        if (!this.closed) this.msgHandler?.({ type: 'stream-ended' })
-      },
-      () => {
-        if (!this.closed) this.msgHandler?.({ type: 'stream-ended' })
-      }
-    )
+    // `closed` can settle long after a reconnect has already replaced this.wt.
+    // Notifying then would tear down the *new* transport, so a stale callback
+    // must stay silent -- the shared `closed` flag alone does not distinguish
+    // which transport is reporting.
+    const notifyIfCurrent = () => {
+      if (this.closed || this.wt !== wt) return
+      this.msgHandler?.({ type: 'stream-ended' })
+    }
+    wt.closed.then(notifyIfCurrent, notifyIfCurrent)
 
     await wt.ready
 
