@@ -6,6 +6,10 @@ import { el, debugLog, toast } from '../util'
 import { StatsOverlay } from './stats'
 import { appendFingerprint } from './sidebar'
 
+// Frame rate requested from the agent. Also used as the decoder's timestamp
+// base, so the two must agree or presentation timestamps drift from real time.
+const REQUESTED_FPS = 60
+
 // Reconnect backoff: exponential with full jitter, capped.
 const RECONNECT_BASE_MS = 500
 const RECONNECT_CAP_MS = 15_000
@@ -234,7 +238,7 @@ export class StreamPanel {
         break
       case 'started':
         this.streaming = true
-        this.decoder.configure(msg.codec, msg.width, msg.height)
+        this.decoder.configure(msg.codec, msg.width, msg.height, REQUESTED_FPS)
         this.stats.update({ width: msg.width, height: msg.height })
         this.cbs.onStatusChange('streaming')
         this.updateToolbar()
@@ -301,7 +305,7 @@ export class StreamPanel {
   }
 
   private startStream(): void {
-    this.transport.start(this.selectedDisplayId)
+    this.transport.start(this.selectedDisplayId, { fps: REQUESTED_FPS })
   }
 
   toggleStats(): void {
