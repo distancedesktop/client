@@ -6,15 +6,19 @@
  * unidirectional stream — one contiguous byte stream with no framing. So:
  *   1. buffer incoming bytes and split them on Annex B start codes
  *      (00 00 00 01 / 00 00 01);
- *   2. group NALs into access units (one per frame) using the standard rule
- *      "a new access unit starts at the first VCL NAL following a non-VCL NAL",
- *      keeping the SPS/PPS/SEI that precede a frame attached to it;
+ *   2. group NALs into access units (one per frame), starting a new unit at each
+ *      VCL NAL whose slice header reports first_mb_in_slice == 0, so the
+ *      SPS/PPS/SEI preceding a frame stay attached to it;
  *   3. build the AVCDecoderConfigurationRecord (avcC `description`) from the
  *      SPS/PPS and derive the RFC 6381 `avc1.PPCCLL` codec string from the SPS —
  *      the profile and level must come from the bitstream, not a constant, or
  *      `VideoDecoder` silently decodes nothing;
  *   4. convert each access unit from Annex B to AVCC (4-byte length prefixes)
  *      and feed it as one `EncodedVideoChunk`.
+ *
+ * Streams are always joined mid-GOP, since the agent's encoder is already
+ * running when a viewer connects, so access units before the first keyframe are
+ * discarded (see `emitAU`).
  */
 
 const NAL_IDR = 5
@@ -27,6 +31,25 @@ function nalType(nal: Uint8Array): number {
 
 function isVCL(t: number): boolean {
   return t >= 1 && t <= 5
+}
+
+/**
+ * True when a VCL NAL starts a new picture, i.e. its slice header's
+ * `first_mb_in_slice` is 0.
+ *
+ * That field is the first ue(v) Exp-Golomb value after the 1-byte NAL header,
+ * and ue(v) == 0 is encoded as a single set bit, so a high bit in the first
+ * payload byte means "this slice covers macroblock 0" — a new picture. With
+ * multiple slices per picture only the first has first_mb_in_slice == 0, so this
+ * still identifies exactly one boundary per frame.
+ *
+ * This is the reliable boundary test. Keying off "a VCL NAL following a non-VCL
+ * NAL" only works when the encoder emits SEI/parameter sets between frames:
+ * ffmpeg's Main-profile output does, but its High-profile output does not, and
+ * there consecutive slices would otherwise collapse into a single access unit.
+ */
+function startsNewPicture(nal: Uint8Array): boolean {
+  return nal.length > 1 && (nal[1] & 0x80) !== 0
 }
 
 /**
@@ -98,6 +121,8 @@ export class Decoder {
   private codec = ''
   private fps = 60
   private frameIndex = 0
+  private seenKeyframe = false
+  private droppedBeforeKeyframe = 0
 
   private frameCount = 0
   private fpsWindowStart = performance.now()
@@ -166,15 +191,14 @@ export class Decoder {
     if (t === NAL_SPS) this.sps = nal.slice()
     else if (t === NAL_PPS) this.pps = nal.slice()
 
-    // Access-unit boundary: a VCL NAL that follows a non-VCL NAL begins a new
-    // frame, and the run of non-VCL NALs before it belongs to that new frame.
-    if (isVCL(t) && this.pendingAU.length > 0) {
-      const lastT = nalType(this.pendingAU[this.pendingAU.length - 1])
-      if (!isVCL(lastT)) {
-        let split = this.pendingAU.length
-        while (split > 0 && !isVCL(nalType(this.pendingAU[split - 1]))) split--
-        const au = this.pendingAU.slice(0, split)
-        if (au.length) this.emitAU(au)
+    // A VCL NAL that starts a new picture closes the previous access unit. Any
+    // trailing non-VCL NALs already buffered (SPS/PPS/SEI) are parameter sets
+    // for the *new* picture, so they stay with it rather than being emitted.
+    if (isVCL(t) && startsNewPicture(nal) && this.pendingAU.length > 0) {
+      let split = this.pendingAU.length
+      while (split > 0 && !isVCL(nalType(this.pendingAU[split - 1]))) split--
+      if (split > 0) {
+        this.emitAU(this.pendingAU.slice(0, split))
         this.pendingAU = this.pendingAU.slice(split)
       }
     }
@@ -190,9 +214,29 @@ export class Decoder {
       this.configureDecoder(this.sps, this.pps)
     }
 
+    const isKey = au.some((n) => nalType(n) === NAL_IDR)
+
+    // A stream is joined mid-GOP: the agent's ffmpeg is already running, so the
+    // first access units received are the tail of the previous GOP and reference
+    // frames (and a PPS) that were never sent. Feeding those to VideoDecoder
+    // raises a fatal decode error, which moves it to `closed` and kills the
+    // IDR that follows. So everything before the first keyframe is dropped.
+    if (!this.seenKeyframe) {
+      if (!isKey) {
+        this.droppedBeforeKeyframe++
+        return
+      }
+      this.seenKeyframe = true
+      if (this.droppedBeforeKeyframe > 0) {
+        console.info(
+          `[decoder] dropped ${this.droppedBeforeKeyframe} access unit(s) before the first keyframe`
+        )
+      }
+    }
+
     if (!this.configured) {
-      // Hold access units until the SPS/PPS arrive and the decoder is set up.
-      if (this.pendingBeforeConfig.length < 300) this.pendingBeforeConfig.push(au)
+      // Keyframe arrived but SPS/PPS have not: hold it so the GOP is not lost.
+      if (this.pendingBeforeConfig.length < 8) this.pendingBeforeConfig.push(au)
       return
     }
     if (!this.videoDecoder || this.videoDecoder.state !== 'configured') return
@@ -211,7 +255,6 @@ export class Decoder {
       o += n.length
     }
 
-    const isKey = au.some((n) => nalType(n) === NAL_IDR)
     const timestamp = Math.round((this.frameIndex * 1_000_000) / this.fps)
     const duration = Math.round(1_000_000 / this.fps)
     try {
@@ -231,6 +274,21 @@ export class Decoder {
     }
   }
 
+  /**
+   * A fatal VideoDecoder error moves it to `closed`, after which every decode
+   * throws. Recover by tearing the decoder down and waiting for the next
+   * SPS/PPS + keyframe, rather than leaving a dead decoder in place.
+   */
+  private onDecoderError(e: DOMException): void {
+    console.error('[decoder] error', e)
+    this.configured = false
+    this.seenKeyframe = false
+    this.sps = null
+    this.pps = null
+    this.pendingBeforeConfig = []
+    this.videoDecoder = null
+  }
+
   private configureDecoder(sps: Uint8Array, pps: Uint8Array): void {
     const codec = codecStringFromSps(sps)
     if (this.configured && this.codec === codec) return
@@ -241,7 +299,7 @@ export class Decoder {
 
     this.videoDecoder = new VideoDecoder({
       output: (frame) => this.onFrame(frame),
-      error: (e) => console.error('[decoder] error', e)
+      error: (e) => this.onDecoderError(e)
     })
 
     try {
@@ -313,6 +371,8 @@ export class Decoder {
     this.frameCount = 0
     this.measuredFps = 0
     this.firstFrameDrawn = false
+    this.seenKeyframe = false
+    this.droppedBeforeKeyframe = 0
     try { this.videoDecoder?.reset() } catch { /* ignore */ }
     this.videoDecoder = null
   }
