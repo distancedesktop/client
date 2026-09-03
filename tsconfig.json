@@ -1,9 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
     "module": "ESNext",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "moduleResolution": "bundler",
     "strict": true,
     "noUnusedLocals": true,
@@ -15,6 +14,5 @@
     "isolatedModules": true,
     "esModuleInterop": true
   },
-  "include": ["src/renderer"],
-  "exclude": ["src/main"]
+  "include": ["src"]
 }
