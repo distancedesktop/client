@@ -271,7 +271,10 @@ function hexToBytes(hex: string): Uint8Array {
   return out
 }
 
-export function wtUrl(host: string, port: number): string {
+// The agent rejects upgrades without its viewer token. Browsers cannot set
+// headers on a WebTransport CONNECT, so it travels as a query parameter.
+export function wtUrl(host: string, port: number, token?: string): string {
   const h = host.replace(/^https?:\/\//, '').replace(/\/$/, '')
-  return `https://${h}:${port}/wt`
+  const base = `https://${h}:${port}/wt`
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base
 }

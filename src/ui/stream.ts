@@ -163,7 +163,7 @@ export class StreamPanel {
       return
     }
 
-    const url = wtUrl(this.config.host, this.config.port)
+    const url = wtUrl(this.config.host, this.config.port, this.config.token)
     debugLog('Connecting to', url, fingerprints.length ? `(${fingerprints.length} pinned fingerprint(s))` : '(trusted certificate)')
     try {
       await this.transport.connect({ url, fingerprints })

@@ -10,6 +10,10 @@ export interface ConnectionConfig {
   // rotated agent cert stays reachable; all of them are pinned at connect time.
   // Empty when trustedCert is set.
   fingerprints: string[]
+  // Viewer token the agent requires on the WebTransport upgrade
+  // (`distance-agent --print-token`). Optional only for configs saved before
+  // agents required one; those connections are refused until it is set.
+  token?: string
   // Agent is behind a reverse proxy or serves a publicly trusted cert
   // (agent run with --cert/--key). No fingerprint pinning, no cert manager,
   // so no fingerprint-refresh push either.
