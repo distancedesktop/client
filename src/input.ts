@@ -130,10 +130,17 @@ export class InputController {
   // Losing pointer lock (Escape, focus change) swallows the matching releases,
   // so release whatever the remote still thinks is held.
   private releaseHeld(): void {
-    for (const button of this.heldButtons) this.send({ type: 'input', kind: 'mouseup', button })
-    for (const code of this.heldKeys) this.send({ type: 'input', kind: 'key', code, down: false })
+    const releases: InputMessage[] = [
+      ...[...this.heldButtons].map(button => ({ type: 'input', kind: 'mouseup', button }) as InputMessage),
+      ...[...this.heldKeys].map(code => ({ type: 'input', kind: 'key', code, down: false }) as InputMessage)
+    ]
     this.heldButtons.clear()
     this.heldKeys.clear()
+    try {
+      for (const msg of releases) this.send(msg)
+    } catch {
+      /* transport already closed; the agent releases held input on teardown */
+    }
   }
 
   private onTouch(e: TouchEvent, phase: 'start' | 'move' | 'end'): void {
