@@ -172,6 +172,8 @@ test('start resets before sending; late started preserves the IDR and reset wait
       Object.assign(panel, {
         decoder: d,
         selectedDisplayId: 0,
+        inputEnabled: true,
+        input: { attach() {}, detach() {} },
         stats: { update: size => sizes.push(size) },
         cbs: { onStatusChange: status => statuses.push(status) },
         updateToolbar() {},
