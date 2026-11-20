@@ -115,9 +115,8 @@ export class Decoder {
   }
 
   /**
-   * Prepare for a new stream. The agent encodes H.264 only, and the real codec
-   * string plus dimensions are taken from the SPS once it arrives, so the
-   * `started` message is used just for the frame-rate hint.
+   * Prepare before requesting a new stream. Codec and dimensions come from SPS;
+   * video may arrive before the `started` control message.
    */
   configure(_codec: string, _width?: number, _height?: number, fps?: number): void {
     this.reset()

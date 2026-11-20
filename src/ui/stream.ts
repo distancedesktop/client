@@ -238,7 +238,6 @@ export class StreamPanel {
         break
       case 'started':
         this.streaming = true
-        this.decoder.configure(msg.codec, msg.width, msg.height, REQUESTED_FPS)
         this.stats.update({ width: msg.width, height: msg.height })
         this.cbs.onStatusChange('streaming')
         this.updateToolbar()
@@ -305,6 +304,7 @@ export class StreamPanel {
   }
 
   private startStream(): void {
+    this.decoder.configure('h264', undefined, undefined, REQUESTED_FPS)
     this.transport.start(this.selectedDisplayId, { fps: REQUESTED_FPS })
   }
 

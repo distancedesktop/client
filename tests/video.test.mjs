@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { registerHooks } from 'node:module'
 import { VideoRecordParser } from '../src/video.ts'
 import { Decoder } from '../src/decoder.ts'
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) {
+      return nextResolve(`${specifier}.ts`, context)
+    }
+    return nextResolve(specifier, context)
+  }
+})
+const { StreamPanel } = await import('../src/ui/stream.ts')
 
 function wire(flags, timestampMs, data) {
   const bytes = new Uint8Array(13 + data.length)
@@ -140,5 +151,52 @@ test('WebCodecs configuration failure is contained and a later valid keyframe re
   } finally {
     console.error = warn
     d.close()
+  }
+})
+
+test('start resets before sending; late started preserves the IDR and reset waits for a new keyframe', () => {
+  const previousDocument = globalThis.document
+  globalThis.document = { getElementById: () => null }
+  try {
+    for (const videoFirst of [true, false]) {
+      const d = decoder()
+      const keyframe = { flags: 1, timestampMs: 1, data: annexB(sps, pps, idr) }
+      const delta = { flags: 0, timestampMs: 2, data: annexB([0x41, 0x80, 0x33]) }
+      d.feedFrame(keyframe)
+      MockVideoDecoder.chunks = []
+
+      const panel = Object.create(StreamPanel.prototype)
+      const sizes = []
+      const statuses = []
+      Object.assign(panel, {
+        decoder: d,
+        selectedDisplayId: 0,
+        stats: { update: size => sizes.push(size) },
+        cbs: { onStatusChange: status => statuses.push(status) },
+        updateToolbar() {},
+        transport: {
+          start(displayId, options) {
+            assert.equal(displayId, 0)
+            assert.equal(options.fps, 60)
+            d.feedFrame(delta)
+            assert.equal(MockVideoDecoder.chunks.length, 0, 'reset must wait for an IDR')
+            const started = () => panel.handleMessage({ type: 'started', codec: 'h264', width: 1920, height: 1080 })
+            if (!videoFirst) started()
+            d.feedFrame(keyframe)
+            if (videoFirst) started()
+            d.feedFrame(delta)
+          }
+        }
+      })
+      panel.startStream()
+      assert.deepEqual(MockVideoDecoder.chunks.map(c => c.type), ['key', 'delta'])
+      assert.deepEqual(sizes, [{ width: 1920, height: 1080 }])
+      assert.deepEqual(statuses, ['streaming'])
+      assert.equal(panel.streaming, true)
+      d.close()
+    }
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document
+    else globalThis.document = previousDocument
   }
 })
