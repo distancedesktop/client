@@ -158,6 +158,13 @@ export class Sidebar {
     const portInput = el('input', { type: 'number', placeholder: 'Port' }) as HTMLInputElement
     portInput.value = '52020'
 
+    const tokenInput = el('input', {
+      type: 'password',
+      placeholder: 'Viewer token (distance-agent --print-token)',
+      autocomplete: 'off'
+    }) as HTMLInputElement
+    tokenInput.required = true
+
     const fpRow = el('div', { class: 'form-row' })
     const fpInput = el('input', { type: 'text', placeholder: 'SHA-256 Fingerprint (64 hex chars)' }) as HTMLInputElement
     fpRow.append(fpInput)
@@ -190,16 +197,17 @@ export class Sidebar {
     })
     actions.append(saveBtn, cancelBtn)
 
-    form.append(nameInput, hostInput, portInput, trustedRow, trustedHint, fpRow, actions)
+    form.append(nameInput, hostInput, portInput, tokenInput, trustedRow, trustedHint, fpRow, actions)
     form.addEventListener('submit', (e) => {
       e.preventDefault()
       const name = nameInput.value.trim()
       const host = hostInput.value.trim()
       const port = parseInt(portInput.value, 10) || 52020
+      const token = tokenInput.value.trim()
       const trustedCert = trustedBox.checked
       const fp = normalizeFingerprint(fpInput.value)
       fpInput.setCustomValidity('')
-      if (!name || !host) return
+      if (!name || !host || !token) return
       // Without trusted-cert mode the fingerprint is mandatory: pinning is the
       // only way to reach the agent's self-signed cert, and saving an empty list
       // would produce a connection that StreamPanel.connect always rejects.
@@ -218,6 +226,7 @@ export class Sidebar {
         host,
         port,
         fingerprints: trustedCert ? [] : [fp],
+        token,
         trustedCert
       }
       this.cbs.onAdd(config)

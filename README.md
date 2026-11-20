@@ -20,6 +20,13 @@ use `https://` (or `localhost`) when serving it.
 Add a connection with the agent's host, port (`52020` by default) and the
 SHA-256 certificate fingerprint the agent prints on startup.
 
+Every connection also needs the agent's **viewer token**: the agent refuses
+viewers without it. Show it on the agent machine with
+`distance-agent --print-token`. The client sends it as `?token=` on the
+WebTransport URL (browsers cannot set headers on a WebTransport CONNECT) and
+stores it with the connection in this browser's local storage. Connections
+saved before this change have no token and are refused until re-added.
+
 Tick **Trusted certificate** and leave the fingerprint blank only when the agent
 presents a **CA-trusted** certificate — served through a reverse proxy, or run
 with `--cert`/`--key` pointing at a real certificate for that hostname. That mode
