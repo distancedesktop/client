@@ -268,3 +268,45 @@ test('transport.closed rejection and close during its notification do not leak r
     else globalThis.window = previousWindow
   }
 })
+
+test('FPS updates refresh the streaming label without replacing Stop or input controls', () => {
+  const previousDocument = globalThis.document
+  const toolbar = { children: [], append(...nodes) { this.children.push(...nodes) } }
+  globalThis.document = {
+    createElement: () => ({ addEventListener() {} })
+  }
+  const panel = Object.create(StreamPanel.prototype)
+  const updates = []
+  const input = {}
+  Object.assign(panel, {
+    streaming: true,
+    decoder: { currentFps: 0 },
+    stats: { update: value => updates.push(value) },
+    inputToggle: () => input,
+    root: { querySelector: selector => selector === '#stream-toolbar'
+      ? toolbar : toolbar.children.find(node => node.className === 'stream-status') }
+  })
+  try {
+    panel.updateToolbar()
+    const [status, toggle, stop] = toolbar.children
+    assert.equal(status.textContent, 'Streaming (0 fps)')
+    for (const fps of [60, 59, 0]) {
+      panel.updateFps(fps)
+      assert.equal(status.textContent, `Streaming (${fps} fps)`)
+      assert.deepEqual(updates.at(-1), { fps })
+      assert.equal(toolbar.children[1], toggle)
+      assert.equal(toolbar.children[2], stop)
+    }
+    assert.equal(toggle, input)
+    assert.equal(stop.textContent, 'Stop')
+    panel.streaming = false
+    panel.updateFps(30)
+    assert.equal(status.textContent, 'Streaming (0 fps)')
+    toolbar.children = []
+    panel.streaming = true
+    assert.doesNotThrow(() => panel.updateFps(60))
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document
+    else globalThis.document = previousDocument
+  }
+})

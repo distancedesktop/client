@@ -63,7 +63,7 @@ export class StreamPanel {
     this.transport.onStats((s) => {
       this.stats.update({ bitrate: s.bitrate, rtt: s.rtt, online: this.transport.connected })
     })
-    this.decoder.onFps = (fps) => this.stats.update({ fps })
+    this.decoder.onFps = (fps) => this.updateFps(fps)
     this.decoder.onFirstFrame = () => this.stats.show()
 
     this.render()
@@ -100,7 +100,7 @@ export class StreamPanel {
     toolbar.innerHTML = ''
 
     if (this.streaming) {
-      const info = el('span', { text: `Streaming (${this.decoder.currentFps} fps)` })
+      const info = el('span', { class: 'stream-status', text: `Streaming (${this.decoder.currentFps} fps)` })
       const stopBtn = el('button', { class: 'stop-btn', text: 'Stop' }) as HTMLButtonElement
       stopBtn.addEventListener('click', () => this.stopStream())
       toolbar.append(info, this.inputToggle(), stopBtn)
@@ -125,6 +125,13 @@ export class StreamPanel {
       startBtn.addEventListener('click', () => this.startStream())
       toolbar.append(label, select, startBtn)
     }
+  }
+
+  private updateFps(fps: number): void {
+    this.stats.update({ fps })
+    if (!this.streaming) return
+    const status = this.root.querySelector('.stream-status')
+    if (status) status.textContent = `Streaming (${fps} fps)`
   }
 
   // Remote input is off by default: the agent has no `input` handler yet, so
