@@ -88,10 +88,8 @@ export class StreamPanel {
     this.root.append(toolbar)
 
     const container = el('div', { class: 'canvas-container' })
-    container.append(this.canvas)
+    container.append(this.canvas, this.stats.el)
     this.root.append(container)
-
-    this.root.append(this.stats.el)
   }
 
   private updateToolbar(): void {
