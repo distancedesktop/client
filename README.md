@@ -44,9 +44,29 @@ openssl x509 -in cert.pem -outform der | openssl dgst -sha256
 
 ## Protocol
 
-Control messages are newline-delimited JSON on one bidirectional stream; video
-is raw H.264 Annex B on server-initiated unidirectional streams. See
+Control messages are newline-delimited JSON on one bidirectional stream. See
 `src/types.ts` for the message shapes, which track the agent's `src/session.go`.
+
+Video uses framed records on server-initiated unidirectional streams:
+
+| Bytes | Description |
+|-------|-------------|
+| 1 | Flags; bit 0 marks an IDR/keyframe |
+| 8 | Timestamp in milliseconds since stream start, unsigned big-endian |
+| 4 | Payload length in bytes, unsigned big-endian |
+| N | One complete H.264 access unit in Annex B format |
+
+Reads may split a record or contain several records. The client assembles each
+record before decoding its payload as one frame, using the IDR flag and converting
+the timestamp to WebCodecs microseconds. Payloads must be between 1 byte and
+64 MiB in size. Malformed SPS parameter sets are discarded
+without stopping reception.
+
+Run the record-parser and decoder regression tests with Node 24+:
+
+```bash
+node --test tests/video.test.mjs
+```
 
 ## Requirements
 

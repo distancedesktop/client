@@ -59,7 +59,7 @@ export class StreamPanel {
     })
 
     this.transport.onMessage((msg: ControlMessage) => this.handleMessage(msg))
-    this.transport.setVideoHandler((chunk) => this.decoder.feed(chunk))
+    this.transport.setVideoHandler((frame) => this.decoder.feedFrame(frame))
     this.transport.onStats((s) => {
       this.stats.update({ bitrate: s.bitrate, rtt: s.rtt, online: this.transport.connected })
     })
