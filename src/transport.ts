@@ -1,4 +1,5 @@
 import type { ClientMessage, ControlMessage } from './types'
+import { VideoRecordParser, type VideoFrameRecord } from './video'
 
 export interface ConnectOptions {
   url: string
@@ -21,7 +22,7 @@ export interface TransportStats {
 const WT_PROTOCOLS = ['moq-lite-04']
 
 type MessageHandler = (msg: ControlMessage) => void
-type VideoHandler = (chunk: Uint8Array) => void
+type VideoHandler = (frame: VideoFrameRecord) => void
 type StatsHandler = (stats: TransportStats) => void
 
 export class Transport {
@@ -74,7 +75,7 @@ export class Transport {
       if (this.closed || this.wt !== wt) return
       this.msgHandler?.({ type: 'stream-ended' })
     }
-    wt.closed.then(notifyIfCurrent, notifyIfCurrent)
+    wt.closed.then(notifyIfCurrent, notifyIfCurrent).catch(() => { /* session closed */ })
 
     await wt.ready
 
@@ -119,7 +120,7 @@ export class Transport {
     this.closed = true
     if (this.statsTimer) window.clearInterval(this.statsTimer)
     this.statsTimer = undefined
-    try { this.ctrlWriter?.close() } catch { /* ignore */ }
+    try { this.ctrlWriter?.close().catch(() => { /* already closed */ }) } catch { /* ignore */ }
     try { this.wt?.close() } catch { /* ignore */ }
     this.wt = null
     this.ctrlWriter = null
@@ -183,6 +184,7 @@ export class Transport {
   // picked up promptly instead of waiting on the previous one to end.
   private async pumpVideoStream(stream: ReadableStream<Uint8Array>): Promise<void> {
     const reader = stream.getReader()
+    const parser = new VideoRecordParser()
     try {
       while (true) {
         const { value, done } = await reader.read()
@@ -190,8 +192,15 @@ export class Transport {
         if (!value || value.byteLength === 0) continue
         this.rxBytes += value.byteLength
         this.windowBytes += value.byteLength
-        this.videoHandler?.(value)
+        for (const frame of parser.push(value)) {
+          try {
+            this.videoHandler?.(frame)
+          } catch (err) {
+            console.warn('[transport] discarded video frame', err)
+          }
+        }
       }
+      parser.finish()
     } catch (err) {
       if (!this.closed) console.warn('[transport] video stream error', err)
     } finally {
