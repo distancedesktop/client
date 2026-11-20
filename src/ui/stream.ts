@@ -36,7 +36,7 @@ export class StreamPanel {
   private displays: DisplayInfo[] = []
   private selectedDisplayId = 0
   private streaming = false
-  private inputEnabled = false
+  private inputEnabled = true
 
   private attempt = 0
   private reconnectTimer: number | undefined
@@ -134,15 +134,13 @@ export class StreamPanel {
     if (status) status.textContent = `Streaming (${fps} fps)`
   }
 
-  // Remote input is off by default: the agent has no `input` handler yet, so
-  // enabling it only produces `unknown type: input` errors until it does.
   private inputToggle(): HTMLElement {
     const wrap = el('label', { class: 'input-toggle' })
     const box = el('input', { type: 'checkbox' }) as HTMLInputElement
     box.checked = this.inputEnabled
     box.addEventListener('change', () => this.setInputEnabled(box.checked))
-    wrap.title = 'Experimental: the agent does not implement an input handler yet'
-    wrap.append(box, el('span', { text: 'Send input (experimental)' }))
+    wrap.title = 'Control the remote desktop (stream owner only)'
+    wrap.append(box, el('span', { text: 'Send input' }))
     return wrap
   }
 
@@ -208,7 +206,7 @@ export class StreamPanel {
     this.decoder.reset()
     if (this.streaming) {
       this.streaming = false
-      this.setInputEnabled(false)
+      this.input.detach()
     }
     this.displays = []
     this.updateToolbar()
@@ -247,6 +245,7 @@ export class StreamPanel {
         this.streaming = true
         this.stats.update({ width: msg.width, height: msg.height })
         this.cbs.onStatusChange('streaming')
+        this.setInputEnabled(this.inputEnabled)
         this.updateToolbar()
         toast(`Streaming ${msg.width}\u00d7${msg.height}`, 'ok')
         break
@@ -254,7 +253,7 @@ export class StreamPanel {
         this.streaming = false
         this.displays = []
         this.decoder.reset()
-        this.setInputEnabled(false)
+        this.input.detach()
         this.cbs.onStatusChange('connected')
         this.updateToolbar()
         // Ask for displays again so the panel returns to a usable state.
@@ -323,7 +322,7 @@ export class StreamPanel {
     this.transport.stop()
     this.streaming = false
     this.decoder.reset()
-    this.setInputEnabled(false)
+    this.input.detach()
     this.updateToolbar()
   }
 

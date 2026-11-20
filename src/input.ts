@@ -10,9 +10,7 @@ type Send = (msg: InputMessage) => void
  *   (Tab, F-keys, ...).
  * - Wheel and multi-touch (normalized 0..1) are forwarded for remote injection.
  *
- * The agent does NOT implement an `input` handler yet (session.go answers with
- * `{"type":"error","message":"unknown type: input"}`), so the stream panel keeps
- * this off by default.
+ * The agent injects these events only for the active stream owner.
  */
 export class InputController {
   private send: Send
