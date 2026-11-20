@@ -13,6 +13,7 @@ registerHooks({
   }
 })
 const { StreamPanel } = await import('../src/ui/stream.ts')
+const { Transport } = await import('../src/transport.ts')
 
 function wire(flags, timestampMs, data) {
   const bytes = new Uint8Array(13 + data.length)
@@ -198,5 +199,72 @@ test('start resets before sending; late started preserves the IDR and reset wait
   } finally {
     if (previousDocument === undefined) delete globalThis.document
     else globalThis.document = previousDocument
+  }
+})
+
+test('transport close is harmless when empty, active or already closed', async () => {
+  const t = new Transport()
+  assert.doesNotThrow(() => t.close())
+  for (const fail of [false, true]) {
+    let writerCloses = 0
+    let sessionCloses = 0
+    t.ctrlWriter = {
+      close() {
+        writerCloses++
+        return fail ? Promise.reject(new Error('The session is closed')) : Promise.resolve()
+      }
+    }
+    t.wt = {
+      close() {
+        sessionCloses++
+        if (fail) throw new Error('The session is closed')
+      }
+    }
+    assert.doesNotThrow(() => t.close())
+    assert.doesNotThrow(() => t.close())
+    assert.equal(t.connected, false)
+    assert.equal(writerCloses, 1)
+    assert.equal(sessionCloses, 1)
+    await new Promise(resolve => setImmediate(resolve))
+  }
+})
+
+test('transport.closed rejection and close during its notification do not leak rejections', async () => {
+  const previousWT = globalThis.WebTransport
+  const previousWindow = globalThis.window
+  let rejectClosed
+  globalThis.WebTransport = class {
+    ready = Promise.resolve()
+    closed = new Promise((_, reject) => { rejectClosed = reject })
+    async createBidirectionalStream() {
+      return {
+        writable: { getWriter: () => ({ close: () => Promise.reject(new Error('The session is closed')) }) },
+        readable: { getReader: () => ({}) }
+      }
+    }
+    close() { throw new Error('The session is closed') }
+  }
+  globalThis.window = { setInterval: () => 1, clearInterval() {} }
+  const t = new Transport()
+  t.readControlLoop = async () => {}
+  t.readVideoLoop = async () => {}
+  let notifications = 0
+  t.onMessage(() => {
+    notifications++
+    t.close()
+    throw new Error('The session is closed')
+  })
+  try {
+    await t.connect({ url: 'https://localhost:52020/wt', fingerprints: [] })
+    rejectClosed(new Error('The session is closed'))
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(notifications, 1)
+    assert.equal(t.connected, false)
+  } finally {
+    t.close()
+    if (previousWT === undefined) delete globalThis.WebTransport
+    else globalThis.WebTransport = previousWT
+    if (previousWindow === undefined) delete globalThis.window
+    else globalThis.window = previousWindow
   }
 })

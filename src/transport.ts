@@ -75,7 +75,7 @@ export class Transport {
       if (this.closed || this.wt !== wt) return
       this.msgHandler?.({ type: 'stream-ended' })
     }
-    wt.closed.then(notifyIfCurrent, notifyIfCurrent)
+    wt.closed.then(notifyIfCurrent, notifyIfCurrent).catch(() => { /* session closed */ })
 
     await wt.ready
 
@@ -120,7 +120,7 @@ export class Transport {
     this.closed = true
     if (this.statsTimer) window.clearInterval(this.statsTimer)
     this.statsTimer = undefined
-    try { this.ctrlWriter?.close() } catch { /* ignore */ }
+    try { this.ctrlWriter?.close().catch(() => { /* already closed */ }) } catch { /* ignore */ }
     try { this.wt?.close() } catch { /* ignore */ }
     this.wt = null
     this.ctrlWriter = null
