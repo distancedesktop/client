@@ -16,6 +16,8 @@ export class InputController {
   private send: Send
   private target: HTMLElement | null = null
   private locked = false
+  private heldButtons = new Set<number>()
+  private heldKeys = new Set<string>()
   private bound: Array<[EventTarget, string, EventListener, AddEventListenerOptions | boolean]> = []
 
   constructor(send: Send) {
@@ -36,6 +38,7 @@ export class InputController {
       this.locked = document.pointerLockElement === target
       target.classList.toggle('locked', this.locked)
       if (this.locked) this.tryKeyboardLock()
+      else this.releaseHeld()
     })
 
     this.on(target, 'mousemove', (e) => {
@@ -47,12 +50,14 @@ export class InputController {
     this.on(target, 'mousedown', (e) => {
       if (!this.locked) return
       const ev = e as MouseEvent
+      this.heldButtons.add(ev.button)
       this.send({ type: 'input', kind: 'mousedown', button: ev.button })
     })
 
     this.on(target, 'mouseup', (e) => {
       if (!this.locked) return
       const ev = e as MouseEvent
+      this.heldButtons.delete(ev.button)
       this.send({ type: 'input', kind: 'mouseup', button: ev.button })
     })
 
@@ -85,6 +90,7 @@ export class InputController {
   }
 
   detach(): void {
+    this.releaseHeld()
     this.release()
     for (const [t, type, fn, opts] of this.bound) t.removeEventListener(type, fn, opts)
     this.bound = []
@@ -116,7 +122,18 @@ export class InputController {
     if (!this.locked) return
     // Stop the page from acting on keys we forward (scroll, find, ...).
     if (SWALLOW_KEYS.includes(e.key)) e.preventDefault()
+    if (down) this.heldKeys.add(e.code)
+    else this.heldKeys.delete(e.code)
     this.send({ type: 'input', kind: 'key', code: e.code, down })
+  }
+
+  // Losing pointer lock (Escape, focus change) swallows the matching releases,
+  // so release whatever the remote still thinks is held.
+  private releaseHeld(): void {
+    for (const button of this.heldButtons) this.send({ type: 'input', kind: 'mouseup', button })
+    for (const code of this.heldKeys) this.send({ type: 'input', kind: 'key', code, down: false })
+    this.heldButtons.clear()
+    this.heldKeys.clear()
   }
 
   private onTouch(e: TouchEvent, phase: 'start' | 'move' | 'end'): void {
