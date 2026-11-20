@@ -446,6 +446,7 @@ body {
   font-size: 0.78rem;
   backdrop-filter: blur(8px);
   user-select: none;
+  pointer-events: none;
   z-index: 10;
 }
 
