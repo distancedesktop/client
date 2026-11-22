@@ -29,10 +29,7 @@ export interface DisplayInfo {
   refresh_rate: number
 }
 
-// Input messages. NOT IMPLEMENTED SERVER-SIDE: session.go has no `input` case,
-// so these fall through to `default:` and come back as
-// {"type":"error","message":"unknown type: input"}. Kept behind an
-// off-by-default toggle in the stream panel until the agent grows a handler.
+// Remote input is injected by the agent only for the active stream owner.
 export type InputMessage =
   | { type: 'input'; kind: 'mouse'; dx: number; dy: number; buttons: number }
   | { type: 'input'; kind: 'mousedown'; button: number }
